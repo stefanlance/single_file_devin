@@ -9,38 +9,20 @@ client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
 )
 
-filename = "is_prime.py"
-
-if os.path.exists(f"data/original_{filename}"):
-    read_file = open(f"data/original_{filename}", "r")
-    file_contents = read_file.read()
-    read_file.close()
-    write_file = open(f"data/{filename}", "w")
-    write_file.write(file_contents)
-    write_file.close()
-
-read_file = open(f"data/{filename}", "r")
-file_contents = read_file.read()
-read_file.close()
-
-if not os.path.exists(f"data/original_{filename}"):
-    write_file = open(f"data/original_{filename}", "w")
-    write_file.write(file_contents)
-
 write_tests_tool = {
     "name": "create_file_with_tests",
     "description": "Add tests to the given Python file.",
     "input_schema": {
         "type": "object",
         "properties": {
-        "file_contents": {
-            "type": "string",
-            "description": "The contents of the Python file.  Must be a single-line that is properly escaped."
-        },
-        "test_command": {
-            "type": "string",
-            "description": "The Pytest command to run the tests from the CLI."
-        },
+            "file_contents": {
+                "type": "string",
+                "description": "The contents of the Python file.  Must be a single-line that is properly escaped."
+            },
+            "test_command": {
+                "type": "string",
+                "description": "The Pytest command to run the tests from the CLI."
+            },
         },
         "required": ["file_contents", "test_command"]
     }
@@ -75,22 +57,23 @@ def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
 
     return response_json
 
-user_prompt = f"""
-The following code is a single-file Python project named '{filename}'.  
-There may or may not be tests for the methods in the file.  If there are 
-any gaps in any kind of relevant test coverage, please write tests using
-the Pytest framework, and 
-return the full file with the implementation and the tests.  Please also 
-provide a pytest command that will run all the tests you wrote. 
-Please return your output in the `create_file_with_tests` tool.
-Here are the contents of the file:
-{{
-    {json.dumps(file_contents)},
-}}
-Your output should only include the json that was specified above.  
-Do not include any other content in your output.
-ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
-"""
+def user_prompt(filename, file_contents):
+    return f"""
+    The following code is a single-file Python project named '{filename}'.  
+    There may or may not be tests for the methods in the file.  If there are 
+    any gaps in any kind of relevant test coverage, please write tests using
+    the Pytest framework, and 
+    return the full file with the implementation and the tests.  Please also 
+    provide a pytest command that will run all the tests you wrote. 
+    Please return your output in the `create_file_with_tests` tool.
+    Here are the contents of the file:
+    {{
+        {json.dumps(file_contents)},
+    }}
+    Your output should only include the json that was specified above.  
+    Do not include any other content in your output.
+    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    """
 
 system_prompt = """
 You are an expert Python software engineer with decades of experience in 
@@ -113,14 +96,14 @@ error_correction_command_tool = {
     "input_schema": {
         "type": "object",
         "properties": {
-        "command": {
-            "type": "string",
-            "description": "The CLI command to run to correct the test failure."
-        },
-        "error_reason": {
-            "type": "string",
-            "description": "The reason the error occurred."
-        },
+            "command": {
+                "type": "string",
+                "description": "The CLI command to run to correct the test failure."
+            },
+            "error_reason": {
+                "type": "string",
+                "description": "The reason the error occurred."
+            },
         },
         "required": ["command", "error_reason"]
     }
@@ -132,20 +115,20 @@ bug_fix_tool = {
     "input_schema": {
         "type": "object",
         "properties": {
-        "file_contents": {
-            "type": "string",
-            "description": "The updated file contents as a single-line double-escaped string."
-        },
-        "error_reason": {
-            "type": "string",
-            "description": "The reason the error occurred."
-        },
+            "file_contents": {
+                "type": "string",
+                "description": "The updated file contents as a single-line double-escaped string."
+            },
+            "error_reason": {
+                "type": "string",
+                "description": "The reason the error occurred."
+            },
         },
         "required": ["file_contents", "error_reason"]
     }
 }
 
-def handle_test_output(test_output):
+def handle_test_output(filename, test_output):
     print(test_output)
     if test_output.returncode == 0:
         print("Tests passed successfully!")
@@ -153,6 +136,7 @@ def handle_test_output(test_output):
 
     read_file = open(f"data/{filename}", "r")
     file_contents = read_file.read()
+    read_file.close()
     error = test_output.stderr
     error_correcting_user_prompt = f"""
     The tests failed to pass.  Here is the error that was returned when
@@ -181,15 +165,6 @@ def handle_test_output(test_output):
                               [error_correction_command_tool, bug_fix_tool])
 
 
-def run_tests(test_command):
-    test_output = run_test(test_command)
-    error_correction_response_json = handle_test_output(test_output)
-    if error_correction_response_json is not None:
-        print(error_correction_response_json)
-        error_correction_command = error_correction_response_json["command"]
-        error_correction_output = subprocess.run(error_correction_command, shell=True)
-        run_tests(test_command)
-
 TaskType = Enum('TaskType', ['WRITE_TESTS', 'RUN_TESTS', 'FIX_BUG'])
 
 class Task:
@@ -197,13 +172,13 @@ class Task:
         self.type = type
         self.command = command
 
-def do_tasks(tasks : List[Task]):
+def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
     while tasks:
         current_task = tasks.pop()
         match current_task.type:
             case TaskType.WRITE_TESTS:
                 # Call API with write tests prompt
-                actual_response_json = call_anthropic_api(system_prompt, user_prompt, [write_tests_tool])
+                actual_response_json = call_anthropic_api(system_prompt, user_prompt(filename, file_contents), [write_tests_tool])
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                 print(new_file_contents)
                 test_command = actual_response_json["test_command"]
@@ -218,11 +193,10 @@ def do_tasks(tasks : List[Task]):
                 tasks.append(new_task)
 
             case TaskType.RUN_TESTS:
-                # Replace filename with new_filename in the test command
+                # Make sure we are running tests on the file in the data directory
                 test_command = current_task.command.replace(filename, f"data/{filename}")
-                
                 test_output = run_test(test_command)
-                error_correction_response_json = handle_test_output(test_output)
+                error_correction_response_json = handle_test_output(filename, test_output)
                 
                 if error_correction_response_json is not None:
                     print(error_correction_response_json)
@@ -237,6 +211,28 @@ def do_tasks(tasks : List[Task]):
 
     return
 
+def set_up_files(filename): 
+    if os.path.exists(f"data/original_{filename}"):
+        read_file = open(f"data/original_{filename}", "r")
+        file_contents = read_file.read()
+        read_file.close()
+        write_file = open(f"data/{filename}", "w")
+        write_file.write(file_contents)
+        write_file.close()
+
+    read_file = open(f"data/{filename}", "r")
+    file_contents = read_file.read()
+    read_file.close()
+
+    if not os.path.exists(f"data/original_{filename}"):
+        write_file = open(f"data/original_{filename}", "w")
+        write_file.write(file_contents)
+    
+    return file_contents
+
 if __name__ == "__main__":
+    filename = "is_prime.py"
+    file_contents = set_up_files(filename)
+
     tasks = [Task(TaskType.WRITE_TESTS)]
-    do_tasks(tasks)
+    do_tasks(filename, file_contents, tasks)
