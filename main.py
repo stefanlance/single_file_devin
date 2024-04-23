@@ -1,5 +1,6 @@
 from enum import Enum
 import anthropic
+import html
 import json
 import subprocess
 from typing import List, Dict
@@ -50,12 +51,16 @@ def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
     )
 
     response_string = message.model_dump_json()
-    # print(response_string)
-    response_json = json.loads(response_string)["content"][0]["input"]
+    print(response_string)
 
-    # print(response_json)
+    for response_item in json.loads(response_string)["content"]:
+        if "input" not in response_item:
+            continue
 
-    return response_json
+        response_json = response_item["input"]
+        return response_json
+    
+    return None
 
 def user_prompt(filename, file_contents):
     return f"""
@@ -134,7 +139,7 @@ def handle_test_output(filename, test_output):
         print("Tests passed successfully!")
         return None
 
-    read_file = open(f"data/{filename}", "r")
+    read_file = open(f"{filename}", "r")
     file_contents = read_file.read()
     read_file.close()
     error = test_output.stderr
@@ -173,6 +178,8 @@ class Task:
         self.command = command
 
 def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
+    filename = "data/" + filename
+
     while tasks:
         current_task = tasks.pop()
         match current_task.type:
@@ -180,11 +187,12 @@ def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
                 # Call API with write tests prompt
                 actual_response_json = call_anthropic_api(system_prompt, user_prompt(filename, file_contents), [write_tests_tool])
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                new_file_contents = html.unescape(new_file_contents)
                 print(new_file_contents)
                 test_command = actual_response_json["test_command"]
 
                 # Write output to file
-                new_file = open(f"data/{filename}", "w")
+                new_file = open(f"{filename}", "w")
                 new_file.write(new_file_contents)
                 new_file.close()
 
@@ -193,15 +201,26 @@ def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
                 tasks.append(new_task)
 
             case TaskType.RUN_TESTS:
-                # Make sure we are running tests on the file in the data directory
-                test_command = current_task.command.replace(filename, f"data/{filename}")
-                test_output = run_test(test_command)
+                test_output = run_test(current_task.command)
                 error_correction_response_json = handle_test_output(filename, test_output)
                 
-                if error_correction_response_json is not None:
-                    print(error_correction_response_json)
+                if error_correction_response_json is None:
+                    continue
+
+                print(error_correction_response_json)
+
+                if "command" in error_correction_response_json:
                     error_correction_command = error_correction_response_json["command"]
                     new_task = Task(TaskType.FIX_BUG, error_correction_command)
+                    tasks.append(new_task)
+                elif "file_contents" in error_correction_response_json:
+                    new_file_contents = error_correction_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                    new_file_contents = html.unescape(new_file_contents)
+                    new_file = open(f"{filename}", "w")
+                    new_file.write(new_file_contents)
+                    new_file.close()
+
+                    new_task = Task(TaskType.RUN_TESTS, test_command)
                     tasks.append(new_task)
 
             case TaskType.FIX_BUG:
