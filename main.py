@@ -2,7 +2,8 @@ from enum import Enum
 import anthropic
 import json
 import subprocess
-from typing import List
+from typing import List, Dict
+import os
 
 client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
@@ -10,8 +11,21 @@ client = anthropic.Anthropic(
 
 filename = "is_prime.py"
 
+if os.path.exists(f"data/original_{filename}"):
+    read_file = open(f"data/original_{filename}", "r")
+    file_contents = read_file.read()
+    read_file.close()
+    write_file = open(f"data/{filename}", "w")
+    write_file.write(file_contents)
+    write_file.close()
+
 read_file = open(f"data/{filename}", "r")
 file_contents = read_file.read()
+read_file.close()
+
+if not os.path.exists(f"data/original_{filename}"):
+    write_file = open(f"data/original_{filename}", "w")
+    write_file.write(file_contents)
 
 write_tests_tool = {
     "name": "create_file_with_tests",
@@ -33,12 +47,12 @@ write_tests_tool = {
 }
 
 
-def call_anthropic_api(system_prompt, user_prompt, tools_prompt):
+def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
     message = client.beta.tools.messages.create(
         model="claude-3-sonnet-20240229",
         max_tokens=1000,
         temperature=0,
-        tools=[tools_prompt],
+        tools=tools_prompts,
         system=system_prompt,
         messages=[
             {
@@ -54,10 +68,10 @@ def call_anthropic_api(system_prompt, user_prompt, tools_prompt):
     )
 
     response_string = message.model_dump_json()
-    #print(response_string)
+    # print(response_string)
     response_json = json.loads(response_string)["content"][0]["input"]
 
-    #print(response_json)
+    # print(response_json)
 
     return response_json
 
@@ -112,12 +126,33 @@ error_correction_command_tool = {
     }
 }
 
+bug_fix_tool = {
+    "name": "bug_fix_file_contents",
+    "description": "Return updated file contents to fix error while running tests.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+        "file_contents": {
+            "type": "string",
+            "description": "The updated file contents as a single-line double-escaped string."
+        },
+        "error_reason": {
+            "type": "string",
+            "description": "The reason the error occurred."
+        },
+        },
+        "required": ["file_contents", "error_reason"]
+    }
+}
+
 def handle_test_output(test_output):
     print(test_output)
     if test_output.returncode == 0:
         print("Tests passed successfully!")
         return None
 
+    read_file = open(f"data/{filename}", "r")
+    file_contents = read_file.read()
     error = test_output.stderr
     error_correcting_user_prompt = f"""
     The tests failed to pass.  Here is the error that was returned when
@@ -128,12 +163,22 @@ def handle_test_output(test_output):
     If the tests did not run, and the error is due to missing dependencies,
     please give us a pip3 command that will install the necessary dependencies.
     Use the `write_error_correction_command` tool to return the command.
-    Your output should only include the json that was specified above.  
+
+    Otherwise, if the tests run and the error is due to one or more tests failing,
+    then examine the contents of the file provided below to check whether the
+    error is because of a bug in the source file or because of an incorrect test.
+    Use the `bug_fix_file_contents` tool to return the updated file contents
+    such that the error no longer occurs and all the tests pass.
+    {{
+        "file_contents": "{file_contents}"
+    }}
+
+    Your output should only include the string that was specified above.  
     Do not include any other content in your output.
-    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCAPED CORRECTLY.
     """
 
-    return call_anthropic_api(system_prompt, error_correcting_user_prompt, error_correction_command_tool)
+    return call_anthropic_api(system_prompt, error_correcting_user_prompt, 
+                              [error_correction_command_tool, bug_fix_tool])
 
 
 def run_tests(test_command):
@@ -158,14 +203,13 @@ def do_tasks(tasks : List[Task]):
         match current_task.type:
             case TaskType.WRITE_TESTS:
                 # Call API with write tests prompt
-                actual_response_json = call_anthropic_api(system_prompt, user_prompt, write_tests_tool)
+                actual_response_json = call_anthropic_api(system_prompt, user_prompt, [write_tests_tool])
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                print(new_file_contents)
                 test_command = actual_response_json["test_command"]
 
-                # Write output to new file
-                new_filename = f"new_{filename}"
-
-                new_file = open(f"data/{new_filename}", "w")
+                # Write output to file
+                new_file = open(f"data/{filename}", "w")
                 new_file.write(new_file_contents)
                 new_file.close()
 
@@ -175,7 +219,7 @@ def do_tasks(tasks : List[Task]):
 
             case TaskType.RUN_TESTS:
                 # Replace filename with new_filename in the test command
-                test_command = current_task.command.replace(filename, f"data/{new_filename}")
+                test_command = current_task.command.replace(filename, f"data/{filename}")
                 
                 test_output = run_test(test_command)
                 error_correction_response_json = handle_test_output(test_output)
