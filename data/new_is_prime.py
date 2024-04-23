@@ -1,1 +1,48 @@
-import sys\n\ndef is_prime(n):\n    if n <= 1:\n        return False\n    for i in range(2, int(n ** 0.5) + 1):\n        if n % i == 0:\n            return False\n    return True\n\nimport pytest\n\ndef test_is_prime_negative():\n    assert not is_prime(-5)\n\ndef test_is_prime_zero():\n    assert not is_prime(0)\n\ndef test_is_prime_one():\n    assert not is_prime(1)\n\ndef test_is_prime_prime():\n    assert is_prime(7)\n\ndef test_is_prime_not_prime():\n    assert not is_prime(9)\n\ndef test_is_prime_large_prime():\n    assert is_prime(104729)\n\ndef test_is_prime_large_not_prime():\n    assert not is_prime(104728)\n\nif __name__ == \"__main__\":\n    if len(sys.argv) != 2:\n        print(\"Usage: python is_prime.py <integer>\")\n        sys.exit(1)\n\n    try:\n        n = int(sys.argv[1])\n        result = is_prime(n)\n        print(result)\n    except ValueError:\n        print(\"Invalid input. Please provide an integer.\")\n        sys.exit(1)
+import sys
+
+def is_prime(n):
+    if n <= 1:
+        return False
+    for i in range(2, int(n ** 0.5) + 1):
+        if n % i == 0:
+            return False
+    return True
+
+import pytest
+
+def test_is_prime_negative():
+    assert not is_prime(-5)
+
+def test_is_prime_zero():
+    assert not is_prime(0)
+
+def test_is_prime_one():
+    assert not is_prime(1)
+
+def test_is_prime_two():
+    assert is_prime(2)
+
+def test_is_prime_prime():
+    assert is_prime(7)
+
+def test_is_prime_not_prime():
+    assert not is_prime(9)
+
+def test_is_prime_large_prime():
+    assert is_prime(104729)
+
+def test_is_prime_large_not_prime():
+    assert not is_prime(104728)
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python is_prime.py <integer>")
+        sys.exit(1)
+
+    try:
+        n = int(sys.argv[1])
+        result = is_prime(n)
+        print(result)
+    except ValueError:
+        print("Invalid input. Please provide an integer.")
+        sys.exit(1)

@@ -1,6 +1,8 @@
+from enum import Enum
 import anthropic
 import json
 import subprocess
+from typing import List
 
 client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
@@ -128,7 +130,7 @@ def handle_test_output(test_output):
     Use the `write_error_correction_command` tool to return the command.
     Your output should only include the json that was specified above.  
     Do not include any other content in your output.
-    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCAPED CORRECTLY.
     """
 
     return call_anthropic_api(system_prompt, error_correcting_user_prompt, error_correction_command_tool)
@@ -142,18 +144,55 @@ def run_tests(test_command):
         error_correction_command = error_correction_response_json["command"]
         error_correction_output = subprocess.run(error_correction_command, shell=True)
         run_tests(test_command)
-        
-actual_response_json = call_anthropic_api(system_prompt, user_prompt, write_tests_tool)
 
-new_file_contents = actual_response_json["file_contents"]
-test_command = actual_response_json["test_command"]
+TaskType = Enum('TaskType', ['WRITE_TESTS', 'RUN_TESTS', 'FIX_BUG'])
 
-new_filename = f"new_{filename}"
+class Task:
+    def __init__(self, type : TaskType, command : str = '') -> None:
+        self.type = type
+        self.command = command
 
-new_file = open(f"data/{new_filename}", "w")
-new_file.write(new_file_contents)
-new_file.close()
-# Replace filename with new_filename in the test command
-test_command = test_command.replace(filename, f"data/{new_filename}")
+def do_tasks(tasks : List[Task]):
+    while tasks:
+        current_task = tasks.pop()
+        match current_task.type:
+            case TaskType.WRITE_TESTS:
+                # Call API with write tests prompt
+                actual_response_json = call_anthropic_api(system_prompt, user_prompt, write_tests_tool)
+                new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                test_command = actual_response_json["test_command"]
 
-run_tests(test_command)
+                # Write output to new file
+                new_filename = f"new_{filename}"
+
+                new_file = open(f"data/{new_filename}", "w")
+                new_file.write(new_file_contents)
+                new_file.close()
+
+                # Push RUN_TESTS task
+                new_task = Task(TaskType.RUN_TESTS, test_command)
+                tasks.append(new_task)
+
+            case TaskType.RUN_TESTS:
+                # Replace filename with new_filename in the test command
+                test_command = current_task.command.replace(filename, f"data/{new_filename}")
+                
+                test_output = run_test(test_command)
+                error_correction_response_json = handle_test_output(test_output)
+                
+                if error_correction_response_json is not None:
+                    print(error_correction_response_json)
+                    error_correction_command = error_correction_response_json["command"]
+                    new_task = Task(TaskType.FIX_BUG, error_correction_command)
+                    tasks.append(new_task)
+
+            case TaskType.FIX_BUG:
+                _ = subprocess.run(current_task.command, shell=True)
+                new_task = Task(TaskType.RUN_TESTS)
+                tasks.append(new_task)
+
+    return
+
+if __name__ == "__main__":
+    tasks = [Task(TaskType.WRITE_TESTS)]
+    do_tasks(tasks)
