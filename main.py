@@ -6,9 +6,43 @@ import subprocess
 from typing import List, Dict
 import os
 
+# https://pypi.org/project/llm-claude/
+# 
+
 client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
 )
+
+task_type_enum_values = ['SUGGEST_IMPROVEMENTS', 
+                         'WRITE_TESTS', 
+                         'RUN_TESTS', 
+                         'FIX_BUG']
+
+suggestable_task_type_enum_values = ['WRITE_TESTS', 'FIX_BUG']
+
+suggest_improvements_tool = {
+    "name": "suggest_improvements",
+    "description": "Suggest one type of improvement to the given Python file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "file_contents": {
+                "type": "string",
+                "description": "The contents of the Python file.  Must be a single-line that is properly escaped."
+            },
+            "suggested_improvement_type": {
+                "type": "string",
+                "enum": suggestable_task_type_enum_values,
+                "description": "The suggested improvement type to the Python file."
+            },
+            "explanation": {
+                "type": "string",
+                "description": "The explanation for the suggested improvement."
+            },
+        },
+        "required": ["file_contents", "suggested_improvement_type", "explanation"],
+    }
+}
 
 write_tests_tool = {
     "name": "create_file_with_tests",
@@ -62,7 +96,24 @@ def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
     
     return None
 
-def user_prompt(filename, file_contents):
+def suggest_improvements_prompt(filename, file_contents):
+    return f"""
+    The following code is a single-file Python project named '{filename}'.  
+    There may be some issues with the code that you can identify and suggest 
+    improvements for.  Please return the full file with the implementation 
+    and one suggested improvement.  Please also provide a brief explanation 
+    of why you made the change you did.  Please return your output in the 
+    `suggest_improvements_tool` tool.
+    Here are the contents of the file:
+    {{
+        {json.dumps(file_contents)},
+    }}
+    Your output should only include the json that was specified above.  
+    Do not include any other content in your output.
+    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    """
+
+def run_tests_prompt(filename, file_contents):
     return f"""
     The following code is a single-file Python project named '{filename}'.  
     There may or may not be tests for the methods in the file.  If there are 
@@ -170,7 +221,7 @@ def handle_test_output(filename, test_output):
                               [error_correction_command_tool, bug_fix_tool])
 
 
-TaskType = Enum('TaskType', ['WRITE_TESTS', 'RUN_TESTS', 'FIX_BUG'])
+TaskType = Enum('TaskType', task_type_enum_values)
 
 class Task:
     def __init__(self, type : TaskType, command : str = '') -> None:
@@ -183,9 +234,31 @@ def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
     while tasks:
         current_task = tasks.pop()
         match current_task.type:
+            case TaskType.SUGGEST_IMPROVEMENTS:
+                # Call API with suggest improvements prompt
+                actual_response_json = call_anthropic_api(system_prompt, suggest_improvements_prompt(filename, file_contents), [suggest_improvements_tool])
+                new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                new_file_contents = html.unescape(new_file_contents)
+                print(new_file_contents)
+                new_file = open(f"{filename}", "w")
+                new_file.write(new_file_contents)
+                new_file.close()
+                # Read the suggestion.
+                # If the suggestion is to write tests, push WRITE_TESTS task
+                # If the suggestion is to fix a bug, push FIX_BUG task
+                task_type = TaskType[actual_response_json["suggested_improvement_type"]]
+                print(actual_response_json["explanation"])
+                if task_type == TaskType.FIX_BUG and not current_task.command:
+                    new_task = Task(TaskType.WRITE_TESTS)
+                    tasks.append(new_task)
+                else:
+                    new_task = Task(task_type, current_task.command)
+                    tasks.append(new_task)
+                
+                
             case TaskType.WRITE_TESTS:
                 # Call API with write tests prompt
-                actual_response_json = call_anthropic_api(system_prompt, user_prompt(filename, file_contents), [write_tests_tool])
+                actual_response_json = call_anthropic_api(system_prompt, run_tests_prompt(filename, file_contents), [write_tests_tool])
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                 new_file_contents = html.unescape(new_file_contents)
                 print(new_file_contents)
@@ -253,5 +326,5 @@ if __name__ == "__main__":
     filename = "is_prime.py"
     file_contents = set_up_files(filename)
 
-    tasks = [Task(TaskType.WRITE_TESTS)]
+    tasks = [Task(TaskType.SUGGEST_IMPROVEMENTS)]
     do_tasks(filename, file_contents, tasks)
