@@ -3,8 +3,13 @@ import anthropic
 import html
 import json
 import subprocess
-from typing import List, Dict
+from typing import List, Dict, Tuple
 import os
+
+class Message:
+    def __init__(self, role : str, content : str) -> None:
+        self.role = role # user or assistant
+        self.content = str(content) # the input (for user) or output (for assistant)
 
 # Ideas
 # - Linting - can it suggest that we run a linter, and give us an installation
@@ -16,6 +21,13 @@ import os
 #   system prompt?
 # - How can we reliably get the model to give us commands with the full file path specified?
 # - Make output easier to read (attach new_file_contents, test_command, etc. to each task's output)
+#
+# - Check if the model has memory of previous prompts and answers
+# - Intervene if it's still wrong
+# - Work through a binary search tree first, before a red black tree
+#
+# - Modularize the task logic so that FIX_BUG actually fixes bugs, and
+#   SUGGEST_IMPROVEMENTS doesn't necessarily fix a bug (by updating the file)
 
 client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
@@ -36,7 +48,7 @@ suggest_improvements_tool = {
         "properties": {
             "file_contents": {
                 "type": "string",
-                "description": "The contents of the Python file.  Must be a single-line that is properly escaped."
+                "description": "The contents of the Python file.  Must be a single-line that is properly escaped.  Must be valid Python syntax."
             },
             "suggested_improvement_type": {
                 "type": "string",
@@ -72,15 +84,10 @@ write_tests_tool = {
 }
 
 
-def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
-    message = client.beta.tools.messages.create(
-        model="claude-3-sonnet-20240229",
-        max_tokens=4096,
-        temperature=0,
-        tools=tools_prompts,
-        system=system_prompt,
-        messages=[
-            {
+def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools_prompts : List[Dict]):
+    
+    messages = []
+    messages.append({
                 "role": "user",
                 "content": [
                     {
@@ -88,19 +95,49 @@ def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
                         "text": user_prompt,
                     }
                 ]
-            }
-        ]
+            })
+    
+    for i in range(len(memory)):
+        message = memory[len(memory)-(i+1)]
+        messages.append({
+            "role": message.role,
+            "content": [
+                {
+                    "type": "text",
+                    "text": message.content,
+                }
+            ]
+        })
+    
+    message = client.beta.tools.messages.create(
+        model="claude-3-sonnet-20240229",
+        max_tokens=4096,
+        temperature=0,
+        tools=tools_prompts,
+        system=system_prompt,
+        messages=messages,
     )
 
     response_string = message.model_dump_json()
     print(response_string)
 
     for response_item in json.loads(response_string)["content"]:
-        if "input" not in response_item:
+        if "input" not in response_item and "text" not in response_item:
             continue
 
-        response_json = response_item["input"]
-        return response_json
+        if "input" in response_item:
+            response_json = response_item["input"]
+            return response_json
+        
+        if "text" in response_item:
+            resp_json = json.loads(response_item["text"])
+            print(resp_json)
+            # print the keys and values in resp_json
+            for key, value in resp_json.items():
+                print(key, value)
+            return resp_json
+            #response_json = response_item["text"]
+            #return response_json
     
     return None
 
@@ -194,7 +231,7 @@ bug_fix_tool = {
     }
 }
 
-def handle_test_output(filename, test_output):
+def handle_test_output(filename, test_output, memory):
     print(test_output)
     if test_output.returncode == 0:
         print("Tests passed successfully!")
@@ -227,8 +264,15 @@ def handle_test_output(filename, test_output):
     Do not include any other content in your output.
     """
 
-    return call_anthropic_api(system_prompt, error_correcting_user_prompt, 
+    api_response = call_anthropic_api(system_prompt, error_correcting_user_prompt, memory,
                               [error_correction_command_tool, bug_fix_tool])
+    
+    input_message = Message("user", error_correcting_user_prompt)
+    memory.append(input_message)
+    output_message = Message("assistant", api_response)
+    memory.append(output_message)
+
+    return api_response
 
 
 TaskType = Enum('TaskType', task_type_enum_values)
@@ -238,12 +282,15 @@ class Task:
         self.type = type
         self.command = command
 
+
 def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
     filename = "data/" + filename
 
     file_contents = init_file_contents
+    memory : List[Message] = []
 
     while tasks:
+        print("TASKS", tasks)
         current_task = tasks.pop()
         # Reread the file
         read_file = open(f"{filename}", "r")
@@ -252,8 +299,16 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
 
         match current_task.type:
             case TaskType.SUGGEST_IMPROVEMENTS:
+                user_prompt = suggest_improvements_prompt(filename, file_contents)
+
                 # Call API with suggest improvements prompt
-                actual_response_json = call_anthropic_api(system_prompt, suggest_improvements_prompt(filename, file_contents), [suggest_improvements_tool])
+                actual_response_json = call_anthropic_api(system_prompt, user_prompt, memory, [suggest_improvements_tool])
+
+                input_message = Message("user", user_prompt)
+                memory.append(input_message)
+                output_message = Message("assistant", actual_response_json) # TODO maybe convert dict to str or something?
+                memory.append(output_message)
+
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                 new_file_contents = html.unescape(new_file_contents)
                 print(new_file_contents)
@@ -274,8 +329,15 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 
                 
             case TaskType.WRITE_TESTS:
+                user_prompt = run_tests_prompt(filename, file_contents)
                 # Call API with write tests prompt
-                actual_response_json = call_anthropic_api(system_prompt, run_tests_prompt(filename, file_contents), [write_tests_tool])
+                actual_response_json = call_anthropic_api(system_prompt, user_prompt, memory, [write_tests_tool])
+
+                input_message = Message("user", user_prompt)
+                memory.append(input_message)
+                output_message = Message("assistant", actual_response_json) # TODO maybe convert dict to str or something?
+                memory.append(output_message)
+
                 new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                 new_file_contents = html.unescape(new_file_contents)
                 print(new_file_contents)
@@ -292,7 +354,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
 
             case TaskType.RUN_TESTS:
                 test_output = run_test(current_task.command)
-                error_correction_response_json = handle_test_output(filename, test_output)
+                error_correction_response_json = handle_test_output(filename, test_output, memory)
                 
                 if error_correction_response_json is None:
                     continue
@@ -314,6 +376,8 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                     tasks.append(new_task)
 
             case TaskType.FIX_BUG:
+                # Note: this is a stub - it's meant to just install dependencies.
+                # Later we can expand it to _actually_ fix bugs.
                 _ = subprocess.run(current_task.command, shell=True)
                 new_task = Task(TaskType.RUN_TESTS)
                 tasks.append(new_task)
@@ -340,7 +404,7 @@ def set_up_files(filename):
     return file_contents
 
 if __name__ == "__main__":
-    filename = "is_prime.py"
+    filename = "red_black_tree.py"
     file_contents = set_up_files(filename)
 
     tasks = [Task(TaskType.SUGGEST_IMPROVEMENTS)]
