@@ -6,8 +6,16 @@ import subprocess
 from typing import List, Dict
 import os
 
-# https://pypi.org/project/llm-claude/
-# 
+# Ideas
+# - Linting - can it suggest that we run a linter, and give us an installation
+#   command and a linting command to do so?
+# - Set up LLM and LLM Claude (https://pypi.org/project/llm-claude/)
+# - Give the model example inputs and outputs to try to improve performance?
+# - Why is the model adding so many test cases, and some that seem wrong, when
+#   we add instructions about running the test from the top-level directory to the 
+#   system prompt?
+# - How can we reliably get the model to give us commands with the full file path specified?
+# - Make output easier to read (attach new_file_contents, test_command, etc. to each task's output)
 
 client = anthropic.Anthropic(
     # defaults to os.environ.get("ANTHROPIC_API_KEY")
@@ -67,7 +75,7 @@ write_tests_tool = {
 def call_anthropic_api(system_prompt, user_prompt, tools_prompts : List[Dict]):
     message = client.beta.tools.messages.create(
         model="claude-3-sonnet-20240229",
-        max_tokens=1000,
+        max_tokens=4096,
         temperature=0,
         tools=tools_prompts,
         system=system_prompt,
@@ -104,6 +112,7 @@ def suggest_improvements_prompt(filename, file_contents):
     and one suggested improvement.  Please also provide a brief explanation 
     of why you made the change you did.  Please return your output in the 
     `suggest_improvements_tool` tool.
+    The suggested improvement types must be among this set: {suggestable_task_type_enum_values}
     Here are the contents of the file:
     {{
         {json.dumps(file_contents)},
@@ -129,6 +138,7 @@ def run_tests_prompt(filename, file_contents):
     Your output should only include the json that was specified above.  
     Do not include any other content in your output.
     ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    In the command you return, you must use the full path to the file.
     """
 
 system_prompt = """
@@ -228,11 +238,18 @@ class Task:
         self.type = type
         self.command = command
 
-def do_tasks(filename : str, file_contents : str, tasks : List[Task]):
+def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
     filename = "data/" + filename
+
+    file_contents = init_file_contents
 
     while tasks:
         current_task = tasks.pop()
+        # Reread the file
+        read_file = open(f"{filename}", "r")
+        file_contents = read_file.read()
+        read_file.close()
+
         match current_task.type:
             case TaskType.SUGGEST_IMPROVEMENTS:
                 # Call API with suggest improvements prompt

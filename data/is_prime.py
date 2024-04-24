@@ -19,19 +19,16 @@ def test_is_prime_zero():
 def test_is_prime_one():
     assert not is_prime(1)
 
-def test_is_prime_two():
-    assert is_prime(2)
+def test_is_prime_prime():
+    assert is_prime(7)
 
-def test_is_prime_three():
-    assert is_prime(3)
-
-def test_is_prime_four():
-    assert not is_prime(4)
+def test_is_prime_not_prime():
+    assert not is_prime(9)
 
 def test_is_prime_large_prime():
     assert is_prime(104729)
 
-def test_is_prime_large_composite():
+def test_is_prime_large_not_prime():
     assert not is_prime(104728)
 
 if __name__ == "__main__":
