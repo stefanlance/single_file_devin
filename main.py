@@ -87,18 +87,10 @@ write_tests_tool = {
 def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools_prompts : List[Dict]):
     
     messages = []
-    messages.append({
-                "role": "user",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": user_prompt,
-                    }
-                ]
-            })
     
     for i in range(len(memory)):
-        message = memory[len(memory)-(i+1)]
+        # message = memory[len(memory)-(i+1)]
+        message = memory[i]
         messages.append({
             "role": message.role,
             "content": [
@@ -108,6 +100,16 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
                 }
             ]
         })
+
+    messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": user_prompt,
+                    }
+                ]
+            })
     
     message = client.beta.tools.messages.create(
         model="claude-3-sonnet-20240229",
@@ -159,7 +161,7 @@ def suggest_improvements_prompt(filename, file_contents):
     ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
     """
 
-def run_tests_prompt(filename, file_contents):
+def write_tests_prompt(filename, file_contents):
     return f"""
     The following code is a single-file Python project named '{filename}'.  
     There may or may not be tests for the methods in the file.  If there are 
@@ -282,6 +284,9 @@ class Task:
         self.type = type
         self.command = command
 
+    def __repr__(self):
+        return str(self.type)
+
 
 def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
     filename = "data/" + filename
@@ -329,7 +334,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 
                 
             case TaskType.WRITE_TESTS:
-                user_prompt = run_tests_prompt(filename, file_contents)
+                user_prompt = write_tests_prompt(filename, file_contents)
                 # Call API with write tests prompt
                 actual_response_json = call_anthropic_api(system_prompt, user_prompt, memory, [write_tests_tool])
 
