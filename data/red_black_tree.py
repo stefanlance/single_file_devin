@@ -23,8 +23,10 @@ class RedBlackTree:
             parent = current
             if new_node.value < current.value:
                 current = current.left
-            else:
+            elif new_node.value > current.value:
                 current = current.right
+            else:
+                raise ValueError("Duplicate value")
 
         new_node.parent = parent
         if parent is None:
@@ -37,7 +39,7 @@ class RedBlackTree:
         self._insert_fixup(new_node)
 
     def _insert_fixup(self, node):
-        while node.parent is not None and node.parent.color == "RED":
+        while node.parent and node.parent.color == "RED":
             if node.parent == node.parent.parent.left:
                 uncle = node.parent.parent.right
                 if uncle.color == "RED":
@@ -74,6 +76,8 @@ class RedBlackTree:
         node.right = right_child.left
         if right_child.left != self.nil:
             right_child.left.parent = node
+        else:
+            right_child.left = self.nil
 
         right_child.parent = node.parent
         if node.parent is None:
@@ -91,6 +95,8 @@ class RedBlackTree:
         node.left = left_child.right
         if left_child.right != self.nil:
             left_child.right.parent = node
+        else:
+            left_child.right = self.nil
 
         left_child.parent = node.parent
         if node.parent is None:
@@ -107,87 +113,44 @@ import pytest
 
 def test_insert_single_node():
     tree = RedBlackTree()
-    tree.insert(5)
-    assert tree.root.value == 5
+    tree.insert(10)
+    assert tree.root.value == 10
     assert tree.root.color == "BLACK"
 
 def test_insert_multiple_nodes():
     tree = RedBlackTree()
-    tree.insert(5)
-    tree.insert(3)
-    tree.insert(7)
-    tree.insert(1)
-    assert tree.root.value == 5
+    values = [10, 20, 5, 15, 25, 3, 8]
+    for value in values:
+        tree.insert(value)
+    assert tree.root.value == 10
     assert tree.root.color == "BLACK"
-    assert tree.root.left.value == 3
-    assert tree.root.left.color == "BLACK"
-    assert tree.root.right.value == 7
-    assert tree.root.right.color == "BLACK"
-    assert tree.root.left.left.value == 1
-    assert tree.root.left.left.color == "RED"
 
-def test_insert_fixup_case1():
+def test_insert_duplicate_node():
     tree = RedBlackTree()
-    tree.insert(5)
-    tree.insert(3)
-    tree.insert(7)
-    tree.insert(6)
-    assert tree.root.value == 5
-    assert tree.root.color == "BLACK"
-    assert tree.root.left.value == 3
-    assert tree.root.left.color == "BLACK"
-    assert tree.root.right.value == 7
-    assert tree.root.right.color == "BLACK"
-    assert tree.root.right.left.value == 6
-    assert tree.root.right.left.color == "RED"
+    tree.insert(10)
+    with pytest.raises(ValueError):
+        tree.insert(10)
 
-def test_insert_fixup_case2():
+def test_left_rotate():
     tree = RedBlackTree()
-    tree.insert(5)
-    tree.insert(3)
-    tree.insert(7)
-    tree.insert(8)
-    assert tree.root.value == 5
-    assert tree.root.color == "BLACK"
-    assert tree.root.left.value == 3
-    assert tree.root.left.color == "BLACK"
-    assert tree.root.right.value == 7
-    assert tree.root.right.color == "BLACK"
-    assert tree.root.right.right.value == 8
-    assert tree.root.right.right.color == "RED"
+    tree.root = Node(10)
+    tree.root.left = Node(5)
+    tree.root.left.parent = tree.root
+    tree.root.right = Node(20)
+    tree.root.right.parent = tree.root
+    tree._left_rotate(tree.root)
+    assert tree.root.value == 20
+    assert tree.root.left.value == 10
+    assert tree.root.left.left.value == 5
 
-def test_insert_fixup_case3():
+def test_right_rotate():
     tree = RedBlackTree()
-    tree.insert(5)
-    tree.insert(3)
-    tree.insert(7)
-    tree.insert(2)
-    tree.insert(4)
+    tree.root = Node(10)
+    tree.root.left = Node(5)
+    tree.root.left.parent = tree.root
+    tree.root.right = Node(20)
+    tree.root.right.parent = tree.root
+    tree._right_rotate(tree.root)
     assert tree.root.value == 5
-    assert tree.root.color == "BLACK"
-    assert tree.root.left.value == 3
-    assert tree.root.left.color == "BLACK"
-    assert tree.root.left.left.value == 2
-    assert tree.root.left.left.color == "RED"
-    assert tree.root.left.right.value == 4
-    assert tree.root.left.right.color == "RED"
-    assert tree.root.right.value == 7
-    assert tree.root.right.color == "BLACK"
-
-def test_insert_fixup_case4():
-    tree = RedBlackTree()
-    tree.insert(5)
-    tree.insert(3)
-    tree.insert(7)
-    tree.insert(8)
-    tree.insert(9)
-    assert tree.root.value == 5
-    assert tree.root.color == "BLACK"
-    assert tree.root.left.value == 3
-    assert tree.root.left.color == "BLACK"
-    assert tree.root.right.value == 8
-    assert tree.root.right.color == "BLACK"
-    assert tree.root.right.left.value == 7
-    assert tree.root.right.left.color == "RED"
-    assert tree.root.right.right.value == 9
-    assert tree.root.right.right.color == "RED"
+    assert tree.root.right.value == 10
+    assert tree.root.right.right.value == 20

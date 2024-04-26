@@ -120,7 +120,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             })
     
     message = client.beta.tools.messages.create(
-        model="claude-3-opus-20240229",
+        model="claude-3-sonnet-20240229",
         max_tokens=4096,
         temperature=0,
         tools=tools_prompts,
@@ -250,7 +250,7 @@ bug_fix_tool = {
     }
 }
 
-def handle_test_output(filename, test_output, memory):
+def handle_test_output(filename, test_output, memory, error_reason : str = ''):
     print(test_output)
     if test_output.returncode == 0:
         print("Tests passed successfully!")
@@ -281,7 +281,15 @@ def handle_test_output(filename, test_output, memory):
         "file_contents": "{file_contents}"
     }}
     """
-    #print(error_correcting_user_prompt)
+
+    if error_reason:
+        error_correcting_user_prompt += f"""
+        The last time we ran the tests, you said that the error was due to this reason:
+        {{
+            "error_reason": "{error_reason}"
+        }}
+        Don't just try the same fix you tried last time. Try something different.
+        """
 
     api_response = call_anthropic_api(system_prompt, error_correcting_user_prompt, memory,
                               [error_correction_command_tool, bug_fix_tool])
@@ -297,9 +305,10 @@ def handle_test_output(filename, test_output, memory):
 TaskType = Enum('TaskType', task_type_enum_values)
 
 class Task:
-    def __init__(self, type : TaskType, command : str = '') -> None:
+    def __init__(self, type : TaskType, command : str = '', error_reason : str = '') -> None:
         self.type = type
         self.command = command
+        self.error_reason = error_reason
 
     def __repr__(self):
         return str(self.type)
@@ -376,7 +385,8 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
 
             case TaskType.RUN_TESTS:
                 test_output = run_test(current_task.command)
-                error_correction_response_json = handle_test_output(filename, test_output, memory)
+                error_reason = current_task.error_reason
+                error_correction_response_json = handle_test_output(filename, test_output, memory, error_reason)
                 
                 if error_correction_response_json is None:
                     continue
@@ -385,17 +395,26 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
 
                 if "command" in error_correction_response_json:
                     error_correction_command = error_correction_response_json["command"]
-                    new_task = Task(TaskType.FIX_BUG, error_correction_command)
+                    
+                    error_reason = ""
+                    if "error_reason" in error_correction_response_json:
+                        error_reason = error_correction_response_json["error_reason"]
+
+                    new_task = Task(TaskType.FIX_BUG, error_correction_command, error_reason)
                     tasks.append(new_task)
+
                 elif "file_contents" in error_correction_response_json:
-                    print(error_correction_response_json["file_contents"])
                     new_file_contents = error_correction_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                     new_file_contents = html.unescape(new_file_contents)
                     new_file = open(f"{filename}", "w")
                     new_file.write(new_file_contents)
                     new_file.close()
 
-                    new_task = Task(TaskType.RUN_TESTS, test_command)
+                    error_reason = ""
+                    if "error_reason" in error_correction_response_json:
+                        error_reason = error_correction_response_json["error_reason"]
+
+                    new_task = Task(TaskType.RUN_TESTS, test_command, error_reason)
                     tasks.append(new_task)
 
             case TaskType.FIX_BUG:
