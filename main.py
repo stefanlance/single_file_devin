@@ -83,6 +83,14 @@ write_tests_tool = {
     }
 }
 
+def convert_keys_to_string(pairs):
+    new_pairs = []
+    for key, val in pairs:
+        if isinstance(key, bytes):
+            key = key.decode('utf-8')
+        new_pairs.append((str(key), val))
+    return dict(new_pairs)
+
 
 def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools_prompts : List[Dict]):
     
@@ -96,7 +104,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             "content": [
                 {
                     "type": "text",
-                    "text": message.content,
+                    "text": message.content
                 }
             ]
         })
@@ -106,7 +114,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
                 "content": [
                     {
                         "type": "text",
-                        "text": user_prompt,
+                        "text": user_prompt
                     }
                 ]
             })
@@ -128,18 +136,19 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             continue
 
         if "input" in response_item:
+            print("Got to input")
             response_json = response_item["input"]
             return response_json
         
         if "text" in response_item:
-            resp_json = json.loads(response_item["text"])
-            print(resp_json)
-            # print the keys and values in resp_json
-            for key, value in resp_json.items():
-                print(key, value)
-            return resp_json
-            #response_json = response_item["text"]
-            #return response_json
+            print("Got to text")
+            print(response_item["text"])
+            response_string = response_item["text"].replace("'", '"')
+            print(response_string)
+            response_json = json.loads(response_string)
+            # return resp_json
+            # response_json = response_item["text"]
+            return response_json
     
     return None
 
@@ -154,11 +163,11 @@ def suggest_improvements_prompt(filename, file_contents):
     The suggested improvement types must be among this set: {suggestable_task_type_enum_values}
     Here are the contents of the file:
     {{
-        {json.dumps(file_contents)},
+        {file_contents},
     }}
     Your output should only include the json that was specified above.  
     Do not include any other content in your output.
-    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    ONLY RETURN VALID JSON! Quote characters should be properly escaped.
     """
 
 def write_tests_prompt(filename, file_contents):
@@ -172,11 +181,11 @@ def write_tests_prompt(filename, file_contents):
     Please return your output in the `create_file_with_tests` tool.
     Here are the contents of the file:
     {{
-        {json.dumps(file_contents)},
+        {file_contents},
     }}
     Your output should only include the json that was specified above.  
     Do not include any other content in your output.
-    ONLY RETURN VALID JSON! MAKE SURE YOUR NEWLINES ARE ESCPAED CORRECTLY.
+    ONLY RETURN VALID JSON! Quote characters should be properly escaped.
     In the command you return, you must use the full path to the file.
     """
 
@@ -189,7 +198,7 @@ engineers.
 """
 
 
-# TODO containize this or sanitize the test so that we don't accidentally
+# TODO containerize this or sanitize the test so that we don't accidentally
 # remove files or do something malicious
 def run_test(test_command):
     test_output = subprocess.run(test_command, shell=True, capture_output=True, text=True)
@@ -371,6 +380,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                     new_task = Task(TaskType.FIX_BUG, error_correction_command)
                     tasks.append(new_task)
                 elif "file_contents" in error_correction_response_json:
+                    print(error_correction_response_json["file_contents"])
                     new_file_contents = error_correction_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                     new_file_contents = html.unescape(new_file_contents)
                     new_file = open(f"{filename}", "w")
