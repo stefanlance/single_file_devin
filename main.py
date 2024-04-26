@@ -96,18 +96,18 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
     
     messages = []
     
-    for i in range(len(memory)):
-        # message = memory[len(memory)-(i+1)]
-        message = memory[i]
-        messages.append({
-            "role": message.role,
-            "content": [
-                {
-                    "type": "text",
-                    "text": message.content
-                }
-            ]
-        })
+    # for i in range(len(memory)):
+    #     # message = memory[len(memory)-(i+1)]
+    #     message = memory[i]
+    #     messages.append({
+    #         "role": message.role,
+    #         "content": [
+    #             {
+    #                 "type": "text",
+    #                 "text": message.content
+    #             }
+    #         ]
+    #     })
 
     messages.append({
                 "role": "user",
@@ -131,24 +131,32 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
     response_string = message.model_dump_json()
     print(response_string)
 
+    print("PRINTING RESPONSE_ITEM KEYS")
     for response_item in json.loads(response_string)["content"]:
-        if "input" not in response_item and "text" not in response_item:
+        # Print the keys in the response item
+        print(response_item.keys())
+
+    print("PROCESSING RESPONSE_ITEM")
+    for response_item in json.loads(response_string)["content"]:
+        if "input" not in response_item:
             continue
 
-        if "input" in response_item:
-            print("Got to input")
-            response_json = response_item["input"]
-            return response_json
+        print("Got to input")
+        response_json = response_item["input"]
+        return response_json
         
-        if "text" in response_item:
-            print("Got to text")
-            print(response_item["text"])
-            response_string = response_item["text"].replace("'", '"')
-            print(response_string)
-            response_json = json.loads(response_string)
-            # return resp_json
-            # response_json = response_item["text"]
-            return response_json
+    for response_item in json.loads(response_string)["content"]:
+        if "text" not in response_item:
+            continue
+
+        print("Got to text")
+        print(response_item["text"])
+        response_string = response_item["text"].replace("'", '"')
+        print(response_string)
+        response_json = json.loads(response_string)
+        # return resp_json
+        # response_json = response_item["text"]
+        return response_json
     
     return None
 
