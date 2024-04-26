@@ -12,6 +12,10 @@ class Message:
         self.content = str(content) # the input (for user) or output (for assistant)
 
 # Ideas
+# - Refactor functionality
+
+
+
 # - Linting - can it suggest that we run a linter, and give us an installation
 #   command and a linting command to do so?
 # - Set up LLM and LLM Claude (https://pypi.org/project/llm-claude/)
@@ -22,8 +26,6 @@ class Message:
 # - How can we reliably get the model to give us commands with the full file path specified?
 # - Make output easier to read (attach new_file_contents, test_command, etc. to each task's output)
 #
-# - Check if the model has memory of previous prompts and answers
-# - Intervene if it's still wrong
 # - Work through a binary search tree first, before a red black tree
 #
 # - Modularize the task logic so that FIX_BUG actually fixes bugs, and
@@ -36,9 +38,10 @@ client = anthropic.Anthropic(
 task_type_enum_values = ['SUGGEST_IMPROVEMENTS', 
                          'WRITE_TESTS', 
                          'RUN_TESTS', 
-                         'FIX_BUG']
+                         'FIX_BUG',
+                         'REFACTOR']
 
-suggestable_task_type_enum_values = ['WRITE_TESTS', 'FIX_BUG']
+suggestable_task_type_enum_values = ['WRITE_TESTS', 'FIX_BUG', 'REFACTOR']
 
 suggest_improvements_tool = {
     "name": "suggest_improvements",
@@ -82,6 +85,32 @@ write_tests_tool = {
         "required": ["file_contents", "test_command"]
     }
 }
+
+refactor_tool = {
+    "name": "refactor_tool",
+    "description": "Refactor the given Python file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "file_contents": {
+                "type": "string",
+                "description": "The contents of the refactored Python file."
+            },
+        },
+        "required": ["file_contents"]
+    }
+}
+
+def refactor_prompt(file_contents):
+    return f"""
+    This code is a single-file Python project.  It may need to be refactored.
+    Please return a refactored version of the code.  Use the `refactor_tool` tool
+    to return your output.  Here are the contents of the file:
+    {{
+        {file_contents}
+    }}
+    The behavior of the refactored file should be the same as the input file.
+    """
 
 def convert_keys_to_string(pairs):
     new_pairs = []
@@ -424,6 +453,25 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 new_task = Task(TaskType.RUN_TESTS)
                 tasks.append(new_task)
 
+            case TaskType.REFACTOR:
+                refactor_prompt_ = refactor_prompt(file_contents)
+                actual_response_json = call_anthropic_api(system_prompt, refactor_prompt_, memory, [refactor_tool])
+
+                input_message = Message("user", refactor_prompt_)
+                memory.append(input_message)
+                output_message = Message("assistant", actual_response_json) # TODO maybe convert dict to str or something?
+                memory.append(output_message)
+
+                new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                new_file_contents = html.unescape(new_file_contents)
+                print(new_file_contents)
+
+                # Write output to file
+                new_file = open(f"{filename}", "w")
+                new_file.write(new_file_contents)
+                new_file.close()
+
+
     return
 
 def set_up_files(filename): 
@@ -446,8 +494,8 @@ def set_up_files(filename):
     return file_contents
 
 if __name__ == "__main__":
-    filename = "red_black_tree.py"
+    filename = "calculator.py"
     file_contents = set_up_files(filename)
 
-    tasks = [Task(TaskType.SUGGEST_IMPROVEMENTS)]
+    tasks = [Task(TaskType.REFACTOR)]
     do_tasks(filename, file_contents, tasks)
