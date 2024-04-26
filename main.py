@@ -120,7 +120,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             })
     
     message = client.beta.tools.messages.create(
-        model="claude-3-sonnet-20240229",
+        model="claude-3-opus-20240229",
         max_tokens=4096,
         temperature=0,
         tools=tools_prompts,
@@ -259,12 +259,14 @@ def handle_test_output(filename, test_output, memory):
     read_file = open(f"{filename}", "r")
     file_contents = read_file.read()
     read_file.close()
-    error = test_output.stderr
+    # error = test_output.stderr
+    # output = test_output.stdout
+    #print(test_output)
     error_correcting_user_prompt = f"""
     The tests failed to pass.  Here is the error that was returned when
     we ran the tests:
     {{
-        "error": "{error}"
+        "error": "{test_output}"
     }}
     If the tests did not run, and the error is due to missing dependencies,
     please give us a pip3 command that will install the necessary dependencies.
@@ -278,10 +280,8 @@ def handle_test_output(filename, test_output, memory):
     {{
         "file_contents": "{file_contents}"
     }}
-
-    Your output should only include the string that was specified above.  
-    Do not include any other content in your output.
     """
+    #print(error_correcting_user_prompt)
 
     api_response = call_anthropic_api(system_prompt, error_correcting_user_prompt, memory,
                               [error_correction_command_tool, bug_fix_tool])
