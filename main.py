@@ -148,7 +148,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             })
     
     message = client.beta.tools.messages.create(
-        model="claude-3-opus-20240229",
+        model="claude-3-sonnet-20240229",
         max_tokens=4096,
         temperature=0,
         tools=tools_prompts,
