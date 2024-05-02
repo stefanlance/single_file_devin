@@ -5,6 +5,7 @@ import json
 import subprocess
 from typing import List, Dict, Tuple
 import os
+import sys
 
 class Message:
     def __init__(self, role : str, content : str) -> None:
@@ -13,8 +14,6 @@ class Message:
 
 # Ideas
 # - Refactor functionality
-
-
 
 # - Linting - can it suggest that we run a linter, and give us an installation
 #   command and a linting command to do so?
@@ -157,20 +156,43 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
         messages=messages,
     )
 
+    print("---------------------------------------")
+    print()
+    print("User prompt:")
+    print()
+    print("---------------------------------------")
+    print()
+    print(user_prompt)
+
     response_string = message.model_dump_json()
-    print(response_string)
+    #print(response_string)
 
-    print("PRINTING RESPONSE_ITEM KEYS")
-    for response_item in json.loads(response_string)["content"]:
-        # Print the keys in the response item
-        print(response_item.keys())
+    # TODO maybe also print prompt
+    pretty_response = message.to_json()
+    print()
+    print("---------------------------------------")
+    print()
+    print("Response from model:")
+    print()
+    print("---------------------------------------")
+    print()
+    print(pretty_response)
+    print()
+    print("---------------------------------------")
+    print()
+    
 
-    print("PROCESSING RESPONSE_ITEM")
+    #print("PRINTING RESPONSE_ITEM KEYS")
+    # for response_item in json.loads(response_string)["content"]:
+    #     # Print the keys in the response item
+    #     print(response_item.keys())
+
+    #print("PROCESSING RESPONSE_ITEM")
     for response_item in json.loads(response_string)["content"]:
         if "input" not in response_item:
             continue
 
-        print("Got to input")
+        #print("Got to input")
         response_json = response_item["input"]
         return response_json
         
@@ -178,10 +200,10 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
         if "text" not in response_item:
             continue
 
-        print("Got to text")
-        print(response_item["text"])
+        #print("Got to text")
+        #print(response_item["text"])
         response_string = response_item["text"].replace("'", '"')
-        print(response_string)
+        #print(response_string)
         response_json = json.loads(response_string)
         # return resp_json
         # response_json = response_item["text"]
@@ -350,7 +372,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
     memory : List[Message] = []
 
     while tasks:
-        print("TASKS", tasks)
+        print("Current tasks:", tasks)
         current_task = tasks.pop()
         # Reread the file
         read_file = open(f"{filename}", "r")
@@ -379,7 +401,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 # If the suggestion is to write tests, push WRITE_TESTS task
                 # If the suggestion is to fix a bug, push FIX_BUG task
                 task_type = TaskType[actual_response_json["suggested_improvement_type"]]
-                print(actual_response_json["explanation"])
+                #print(actual_response_json["explanation"])
                 if task_type == TaskType.FIX_BUG and not current_task.command:
                     new_task = Task(TaskType.WRITE_TESTS)
                     tasks.append(new_task)
@@ -420,7 +442,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 if error_correction_response_json is None:
                     continue
 
-                print(error_correction_response_json)
+                #print(error_correction_response_json)
 
                 if "command" in error_correction_response_json:
                     error_correction_command = error_correction_response_json["command"]
@@ -494,8 +516,20 @@ def set_up_files(filename):
     return file_contents
 
 if __name__ == "__main__":
-    filename = "calculator.py"
+
+    # Return an error if there are not two command line args
+    if len(sys.argv) != 3:
+        print("Usage: python main.py <filename> <initial_task_type>")
+        sys.exit(1)
+
+    # Parse two command line arguments
+    filename = sys.argv[1]
+    initial_task_type = sys.argv[2]
+    #filename = "is_prime.py"
     file_contents = set_up_files(filename)
 
-    tasks = [Task(TaskType.REFACTOR)]
+    # python3 main.py is_prime.py SUGGEST_IMPROVEMENTS
+    # python3 main.py calculator.py REFACTOR
+
+    tasks = [Task(TaskType[initial_task_type])]
     do_tasks(filename, file_contents, tasks)

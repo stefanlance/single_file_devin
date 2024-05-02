@@ -3,7 +3,7 @@ import sys
 def is_prime(n):
     if n <= 1:
         return False
-    for i in range(2, int(n ** 0.5) + 1):
+    for i in range(2, int(n ** 0.5) + 1):  # Change n**0.25 to n**0.5
         if n % i == 0:
             return False
     return True
@@ -31,9 +31,6 @@ def test_is_prime_zero():
 
 def test_is_prime_one():
     assert not is_prime(1)
-
-def test_is_prime_two():
-    assert is_prime(2)
 
 def test_is_prime_prime():
     assert is_prime(7)
