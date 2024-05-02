@@ -5,6 +5,7 @@ import json
 import subprocess
 from typing import List, Dict, Tuple
 import os
+import sys
 
 class Message:
     def __init__(self, role : str, content : str) -> None:
@@ -12,6 +13,8 @@ class Message:
         self.content = str(content) # the input (for user) or output (for assistant)
 
 # Ideas
+# - Refactor functionality
+
 # - Linting - can it suggest that we run a linter, and give us an installation
 #   command and a linting command to do so?
 # - Set up LLM and LLM Claude (https://pypi.org/project/llm-claude/)
@@ -22,8 +25,6 @@ class Message:
 # - How can we reliably get the model to give us commands with the full file path specified?
 # - Make output easier to read (attach new_file_contents, test_command, etc. to each task's output)
 #
-# - Check if the model has memory of previous prompts and answers
-# - Intervene if it's still wrong
 # - Work through a binary search tree first, before a red black tree
 #
 # - Modularize the task logic so that FIX_BUG actually fixes bugs, and
@@ -36,9 +37,10 @@ client = anthropic.Anthropic(
 task_type_enum_values = ['SUGGEST_IMPROVEMENTS', 
                          'WRITE_TESTS', 
                          'RUN_TESTS', 
-                         'FIX_BUG']
+                         'FIX_BUG',
+                         'REFACTOR']
 
-suggestable_task_type_enum_values = ['WRITE_TESTS', 'FIX_BUG']
+suggestable_task_type_enum_values = ['WRITE_TESTS', 'FIX_BUG', 'REFACTOR']
 
 suggest_improvements_tool = {
     "name": "suggest_improvements",
@@ -83,6 +85,32 @@ write_tests_tool = {
     }
 }
 
+refactor_tool = {
+    "name": "refactor_tool",
+    "description": "Refactor the given Python file.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "file_contents": {
+                "type": "string",
+                "description": "The contents of the refactored Python file."
+            },
+        },
+        "required": ["file_contents"]
+    }
+}
+
+def refactor_prompt(file_contents):
+    return f"""
+    This code is a single-file Python project.  It may need to be refactored.
+    Please return a refactored version of the code.  Use the `refactor_tool` tool
+    to return your output.  Here are the contents of the file:
+    {{
+        {file_contents}
+    }}
+    The behavior of the refactored file should be the same as the input file.
+    """
+
 def convert_keys_to_string(pairs):
     new_pairs = []
     for key, val in pairs:
@@ -96,18 +124,18 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
     
     messages = []
     
-    for i in range(len(memory)):
-        # message = memory[len(memory)-(i+1)]
-        message = memory[i]
-        messages.append({
-            "role": message.role,
-            "content": [
-                {
-                    "type": "text",
-                    "text": message.content
-                }
-            ]
-        })
+    # for i in range(len(memory)):
+    #     # message = memory[len(memory)-(i+1)]
+    #     message = memory[i]
+    #     messages.append({
+    #         "role": message.role,
+    #         "content": [
+    #             {
+    #                 "type": "text",
+    #                 "text": message.content
+    #             }
+    #         ]
+    #     })
 
     messages.append({
                 "role": "user",
@@ -120,7 +148,7 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
             })
     
     message = client.beta.tools.messages.create(
-        model="claude-3-sonnet-20240229",
+        model="claude-3-opus-20240229",
         max_tokens=4096,
         temperature=0,
         tools=tools_prompts,
@@ -128,27 +156,58 @@ def call_anthropic_api(system_prompt, user_prompt, memory : List[Message], tools
         messages=messages,
     )
 
-    response_string = message.model_dump_json()
-    print(response_string)
+    print("---------------------------------------")
+    print()
+    print("User prompt:")
+    print()
+    print("---------------------------------------")
+    print()
+    print(user_prompt)
 
+    response_string = message.model_dump_json()
+    #print(response_string)
+
+    # TODO maybe also print prompt
+    pretty_response = message.to_json()
+    print()
+    print("---------------------------------------")
+    print()
+    print("Response from model:")
+    print()
+    print("---------------------------------------")
+    print()
+    print(pretty_response)
+    print()
+    print("---------------------------------------")
+    print()
+    
+
+    #print("PRINTING RESPONSE_ITEM KEYS")
+    # for response_item in json.loads(response_string)["content"]:
+    #     # Print the keys in the response item
+    #     print(response_item.keys())
+
+    #print("PROCESSING RESPONSE_ITEM")
     for response_item in json.loads(response_string)["content"]:
-        if "input" not in response_item and "text" not in response_item:
+        if "input" not in response_item:
             continue
 
-        if "input" in response_item:
-            print("Got to input")
-            response_json = response_item["input"]
-            return response_json
+        #print("Got to input")
+        response_json = response_item["input"]
+        return response_json
         
-        if "text" in response_item:
-            print("Got to text")
-            print(response_item["text"])
-            response_string = response_item["text"].replace("'", '"')
-            print(response_string)
-            response_json = json.loads(response_string)
-            # return resp_json
-            # response_json = response_item["text"]
-            return response_json
+    for response_item in json.loads(response_string)["content"]:
+        if "text" not in response_item:
+            continue
+
+        #print("Got to text")
+        #print(response_item["text"])
+        response_string = response_item["text"].replace("'", '"')
+        #print(response_string)
+        response_json = json.loads(response_string)
+        # return resp_json
+        # response_json = response_item["text"]
+        return response_json
     
     return None
 
@@ -242,7 +301,7 @@ bug_fix_tool = {
     }
 }
 
-def handle_test_output(filename, test_output, memory):
+def handle_test_output(filename, test_output, memory, error_reason : str = ''):
     print(test_output)
     if test_output.returncode == 0:
         print("Tests passed successfully!")
@@ -251,12 +310,14 @@ def handle_test_output(filename, test_output, memory):
     read_file = open(f"{filename}", "r")
     file_contents = read_file.read()
     read_file.close()
-    error = test_output.stderr
+    # error = test_output.stderr
+    # output = test_output.stdout
+    #print(test_output)
     error_correcting_user_prompt = f"""
     The tests failed to pass.  Here is the error that was returned when
     we ran the tests:
     {{
-        "error": "{error}"
+        "error": "{test_output}"
     }}
     If the tests did not run, and the error is due to missing dependencies,
     please give us a pip3 command that will install the necessary dependencies.
@@ -270,10 +331,16 @@ def handle_test_output(filename, test_output, memory):
     {{
         "file_contents": "{file_contents}"
     }}
-
-    Your output should only include the string that was specified above.  
-    Do not include any other content in your output.
     """
+
+    if error_reason:
+        error_correcting_user_prompt += f"""
+        The last time we ran the tests, you said that the error was due to this reason:
+        {{
+            "error_reason": "{error_reason}"
+        }}
+        Don't just try the same fix you tried last time. Try something different.
+        """
 
     api_response = call_anthropic_api(system_prompt, error_correcting_user_prompt, memory,
                               [error_correction_command_tool, bug_fix_tool])
@@ -289,9 +356,10 @@ def handle_test_output(filename, test_output, memory):
 TaskType = Enum('TaskType', task_type_enum_values)
 
 class Task:
-    def __init__(self, type : TaskType, command : str = '') -> None:
+    def __init__(self, type : TaskType, command : str = '', error_reason : str = '') -> None:
         self.type = type
         self.command = command
+        self.error_reason = error_reason
 
     def __repr__(self):
         return str(self.type)
@@ -304,7 +372,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
     memory : List[Message] = []
 
     while tasks:
-        print("TASKS", tasks)
+        print("Current tasks:", tasks)
         current_task = tasks.pop()
         # Reread the file
         read_file = open(f"{filename}", "r")
@@ -333,7 +401,7 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 # If the suggestion is to write tests, push WRITE_TESTS task
                 # If the suggestion is to fix a bug, push FIX_BUG task
                 task_type = TaskType[actual_response_json["suggested_improvement_type"]]
-                print(actual_response_json["explanation"])
+                #print(actual_response_json["explanation"])
                 if task_type == TaskType.FIX_BUG and not current_task.command:
                     new_task = Task(TaskType.WRITE_TESTS)
                     tasks.append(new_task)
@@ -368,26 +436,36 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
 
             case TaskType.RUN_TESTS:
                 test_output = run_test(current_task.command)
-                error_correction_response_json = handle_test_output(filename, test_output, memory)
+                error_reason = current_task.error_reason
+                error_correction_response_json = handle_test_output(filename, test_output, memory, error_reason)
                 
                 if error_correction_response_json is None:
                     continue
 
-                print(error_correction_response_json)
+                #print(error_correction_response_json)
 
                 if "command" in error_correction_response_json:
                     error_correction_command = error_correction_response_json["command"]
-                    new_task = Task(TaskType.FIX_BUG, error_correction_command)
+                    
+                    error_reason = ""
+                    if "error_reason" in error_correction_response_json:
+                        error_reason = error_correction_response_json["error_reason"]
+
+                    new_task = Task(TaskType.FIX_BUG, error_correction_command, error_reason)
                     tasks.append(new_task)
+
                 elif "file_contents" in error_correction_response_json:
-                    print(error_correction_response_json["file_contents"])
                     new_file_contents = error_correction_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
                     new_file_contents = html.unescape(new_file_contents)
                     new_file = open(f"{filename}", "w")
                     new_file.write(new_file_contents)
                     new_file.close()
 
-                    new_task = Task(TaskType.RUN_TESTS, test_command)
+                    error_reason = ""
+                    if "error_reason" in error_correction_response_json:
+                        error_reason = error_correction_response_json["error_reason"]
+
+                    new_task = Task(TaskType.RUN_TESTS, test_command, error_reason)
                     tasks.append(new_task)
 
             case TaskType.FIX_BUG:
@@ -396,6 +474,25 @@ def do_tasks(filename : str, init_file_contents : str, tasks : List[Task]):
                 _ = subprocess.run(current_task.command, shell=True)
                 new_task = Task(TaskType.RUN_TESTS)
                 tasks.append(new_task)
+
+            case TaskType.REFACTOR:
+                refactor_prompt_ = refactor_prompt(file_contents)
+                actual_response_json = call_anthropic_api(system_prompt, refactor_prompt_, memory, [refactor_tool])
+
+                input_message = Message("user", refactor_prompt_)
+                memory.append(input_message)
+                output_message = Message("assistant", actual_response_json) # TODO maybe convert dict to str or something?
+                memory.append(output_message)
+
+                new_file_contents = actual_response_json["file_contents"].encode("utf-8").decode("unicode_escape")
+                new_file_contents = html.unescape(new_file_contents)
+                print(new_file_contents)
+
+                # Write output to file
+                new_file = open(f"{filename}", "w")
+                new_file.write(new_file_contents)
+                new_file.close()
+
 
     return
 
@@ -419,8 +516,20 @@ def set_up_files(filename):
     return file_contents
 
 if __name__ == "__main__":
-    filename = "red_black_tree.py"
+
+    # Return an error if there are not two command line args
+    if len(sys.argv) != 3:
+        print("Usage: python main.py <filename> <initial_task_type>")
+        sys.exit(1)
+
+    # Parse two command line arguments
+    filename = sys.argv[1]
+    initial_task_type = sys.argv[2]
+    #filename = "is_prime.py"
     file_contents = set_up_files(filename)
 
-    tasks = [Task(TaskType.SUGGEST_IMPROVEMENTS)]
+    # python3 main.py is_prime.py SUGGEST_IMPROVEMENTS
+    # python3 main.py calculator.py REFACTOR
+
+    tasks = [Task(TaskType[initial_task_type])]
     do_tasks(filename, file_contents, tasks)

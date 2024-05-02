@@ -36,7 +36,7 @@ class RedBlackTree:
 
         self._insert_fixup(new_node)
 
-    def _insert_fixup(self, node):
+    def _insert_fixup(self, node): 
         while node.parent.color == "RED":
             if node.parent == node.parent.parent.left:
                 uncle = node.parent.parent.right

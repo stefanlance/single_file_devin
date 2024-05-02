@@ -33,11 +33,15 @@ class RedBlackTree:
             parent.left = new_node
         else:
             parent.right = new_node
-
+            
         self._insert_fixup(new_node)
 
     def _insert_fixup(self, node):
-        while node.parent.color == "RED":
+        if node.parent is None:
+            node.color = "BLACK"
+            return
+            
+        while node.parent is not None and node.parent.color == "RED":
             if node.parent == node.parent.parent.left:
                 uncle = node.parent.parent.right
                 if uncle.color == "RED":
@@ -102,3 +106,59 @@ class RedBlackTree:
 
         left_child.right = node
         node.parent = left_child
+
+
+import pytest
+
+def test_insert_root():
+    tree = RedBlackTree()
+    tree.insert(5)
+    assert tree.root.value == 5
+    assert tree.root.color == "BLACK"
+
+def test_insert_left_child():
+    tree = RedBlackTree()
+    tree.insert(5)
+    tree.insert(3)
+    assert tree.root.left.value == 3
+    assert tree.root.left.color == "RED"
+
+def test_insert_right_child():
+    tree = RedBlackTree()
+    tree.insert(5)
+    tree.insert(7)
+    assert tree.root.right.value == 7
+    assert tree.root.right.color == "RED"
+
+def test_insert_red_parent_red_uncle():
+    tree = RedBlackTree()
+    tree.insert(5)
+    tree.insert(3)
+    tree.insert(7)
+    tree.insert(2)
+    assert tree.root.color == "BLACK"
+    assert tree.root.left.color == "BLACK"
+    assert tree.root.right.color == "BLACK"
+    assert tree.root.left.left.color == "RED"
+
+def test_insert_red_parent_black_uncle_left_rotate():
+    tree = RedBlackTree()
+    tree.insert(5)
+    tree.insert(3)
+    tree.insert(7)
+    tree.insert(4)
+    assert tree.root.color == "BLACK"
+    assert tree.root.left.color == "BLACK"
+    assert tree.root.right.color == "BLACK"
+    assert tree.root.left.right.color == "RED"
+
+def test_insert_red_parent_black_uncle_right_rotate():
+    tree = RedBlackTree()
+    tree.insert(5)
+    tree.insert(3)
+    tree.insert(7)
+    tree.insert(6)
+    assert tree.root.color == "BLACK"
+    assert tree.root.left.color == "BLACK"
+    assert tree.root.right.color == "BLACK"
+    assert tree.root.right.left.color == "RED"
